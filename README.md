@@ -25,7 +25,7 @@ brew install pdftohtml
 pip install pa
 ```
 
-## Nutshell
+## Usage
 Here is a small example showing how to manage your file. For more details plseas refer to `pa --help`
 ```
 cd your_floder_storing_pdf_files

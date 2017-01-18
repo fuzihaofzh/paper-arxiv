@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='pa',
-    version='0.0.5.dev',
+    version='0.0.8.dev',
     description='Paper Arxiv: A command line based academic paper management tool.',
     url='',
     author='',
@@ -15,7 +15,7 @@ setup(
     keywords='paper arxiv manage',
     packages=find_packages(),
     install_requires=[
-          'click',
+          'click', 'tinydb'
     ],
     entry_points={
           'console_scripts': [

@@ -506,6 +506,7 @@ class PaperManager(object):
             if tags:
                 print 'tags:', infoMap[f]['tags']'''
 
+pm = PaperManager()
 
 
 @click.group()
@@ -601,7 +602,6 @@ def find(keyword, head, tags, author, body, comment, outhead, outtags, outauthor
 
 def main():
     os.system('mkdir -p .tmp')
-    pm = PaperManager()
     cli()
     os.system('rm .tmp')
 

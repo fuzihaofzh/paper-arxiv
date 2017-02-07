@@ -37,5 +37,5 @@ pa --help
 ```
 
 ## TODO
-- [ ] add woosh as index tool
+- [ ] add whoosh as index tool
 - [ ] add test cases

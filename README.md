@@ -35,3 +35,7 @@ pa add https://arxiv.org/pdf/1701.02720.pdf
 pa find -a Bengio
 pa --help
 ```
+
+## TODO
+- [ ] add woosh as index tool
+- [ ] add test cases

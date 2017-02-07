@@ -39,3 +39,4 @@ pa --help
 ## TODO
 - [ ] add whoosh as index tool
 - [ ] add test cases
+- [ ] find case sensitive

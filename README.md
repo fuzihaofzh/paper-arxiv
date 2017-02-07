@@ -40,3 +40,6 @@ pa --help
 - [ ] add whoosh as index tool
 - [ ] add test cases
 - [ ] find case sensitive
+- [ ] GMT 时间
+- [ ] index不存在报错
+- [ ] 修改文件名

@@ -21,26 +21,21 @@ Paper Arxiv is a command line base academic paper management tool. It provide an
 
 ## Install
 ```
-brew install pdftohtml
+brew install pdftohtml # for mac
+sudo apt-get install pdftohtml # for Ubuntu
 pip install pa
+pa config --libpath /Path/To/Store/Library
 ```
 
 ## Usage
-Here is a small example showing how to manage your file. For more details plseas refer to `pa --help`
+Here is a small example showing how to manage your file. For more details plseas refer to `pa --h`
 ```
 cd your_floder_storing_pdf_files
-pa init
-pa add .
+pa add slide.pdf
 pa add https://arxiv.org/pdf/1701.02720.pdf
-pa find -a Bengio
-pa --help
+pa find VAE
+pa -h
 ```
 
 ## TODO
-- [ ] add whoosh as index tool
 - [ ] add test cases
-- [ ] find case sensitive
-- [ ] GMT 时间
-- [ ] index不存在报错
-- [ ] 修改文件名
-- [ ] 按会议名称、文件名称查找

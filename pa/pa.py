@@ -1,48 +1,171 @@
 #!/usr/bin/env python
 # encoding=utf-8
+from __future__ import print_function
 import argparse
 import sys
 import collections
 import re
-import tinydb
 import os
 import json
 import io
-import click
 import time
 
 
-class UserException(BaseException):
-    pass
+reload(sys)
+sys.setdefaultencoding('utf-8')
 
-class DBManager(object):
-    def __init__(self, path):
-        if os.path.exists(path):
-            self.db = tinydb.TinyDB(os.path.join(path, 'pmdb.json'))
+class ReadChar():
+    def __enter__(self):
+        import tty, sys, termios
+        self.fd = sys.stdin.fileno()
+        self.old_settings = termios.tcgetattr(self.fd)
+        tty.setraw(sys.stdin.fileno())
+        return sys.stdin.read(1)
+    def __exit__(self, type, value, traceback):
+        import tty, sys, termios
+        termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_settings)
 
-    def insert(self, data):
-        if self.db.search(tinydb.where('name') == data['name']):
-            raise UserException("Dumplicate key name. The item with name = '%s' has already been stored in the database."%data['name'])
-        self.db.insert(data)
+class TempPath:
+    def __init__(self):
+        self.temPath = os.path.join(PaperManager.getLibPath(), '.tmp')
 
-    def remove(self, name):
-        rent = self.db.search(tinydb.where('name') == name)
-        if len(rent) == 0:
-            raise UserException("There is no item with name = '%s' in the database."%name)
-        self.db.remove(tinydb.where('name') == name)
+    def __enter__(self):
+        if os.path.exists(self.temPath):
+            import shutil
+            shutil.rmtree(self.temPath)  
+        os.mkdir(self.temPath)
+        return self.temPath
 
-    def all(self):
-        if not hasattr(self, 'db'):
-            raise UserException('Please use init in this folder first.')
-        return self.db.all()
+    def __exit__(self, type, value, traceback):
+        import shutil
+        #shutil.rmtree(self.temPath)
 
-    def get(self, name):
-        return self.db.get(tinydb.where('name') == name)
+class PaperDBCursor():
+    def __init__(self):
+        self.dbpath = os.path.join(PaperManager.getLibPath(), "pa.db")
+        self.tableName  = "docInfoTable"
+    def __enter__(self):
+        import sqlite3
+        self.conn = sqlite3.connect(self.dbpath)
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("create table if not exists %s (name text NOT NULL PRIMARY KEY, title text, authors text, year text, journal text, tags text, comment text, path text, link text, addTime datetime, updateTime datetime, srcType text, content text)"%(self.tableName))
+        return (self.cursor, self.tableName)
 
-    def update(self, data, name):
-        self.db.update(data, tinydb.where('name') == name)
+    def __exit__(self, type, value, traceback):
+        self.cursor.close()
+        self.conn.commit()
+        self.conn.close()
 
-class Utils(object):
+class PaperDB():
+    @classmethod
+    def getEmptyMeta(cls):
+        dbmeta = collections.OrderedDict([
+            ('name', ''),
+            ('title', ''),
+            ('authors', ''),
+            ('year', ''),
+            ('journal', ''),
+            ('tags', ''),
+            ('comment', ''),
+            ('path', ''),
+            ('link', ''),
+            ('addTime', ''),
+            ('updateTime', ''),
+            ('srcType', ''),
+            ('content', ''),
+            ])
+        return dbmeta
+    @classmethod
+    def insert(cls, records):
+        if 'name' not in records:
+            print('insert should have the name attribute!')
+            return
+        with PaperDBCursor() as (cursor, tableName):
+            sqlcmd = 'insert into %s values ('%(tableName) + ','.join(map(lambda x: '?', records)) + ')'
+            par = tuple(map(lambda x: records[x], records))
+            cursor.execute(sqlcmd, par)
+
+    @classmethod
+    def delete(cls, name):
+        with PaperDBCursor() as (cursor, tableName):
+            cursor.execute('delete from %s where name = ?'%(tableName), (name,))
+    
+    @classmethod
+    def update(cls, name, records):
+        with PaperDBCursor() as (cursor, tableName):
+            if len(cursor.execute('select name from %s where name = ?'%(tableName), (name,)).fetchall()) != 0:
+                sqlcmd = 'update %s set '%(tableName) + ','.join(map(lambda x: x + ' = ? ', records)) + ' where name = "%s"'%(name)
+                par = tuple(map(lambda x: records[x], records))
+                cursor.execute(sqlcmd, par)
+            else:
+                cls.insert(records)
+
+    @classmethod
+    def getMeta(cls, name):
+        ret = cls.getEmptyMeta()
+        del ret['content']
+        with PaperDBCursor() as (cursor, tableName):
+            data = cursor.execute('select name, title, authors, year, journal, tags, comment, path, link, addTime, updateTime, srcType from %s where name = ?'%(tableName), (name,)).fetchone()
+            if data is None:
+                return None 
+            for i, key in enumerate(ret):
+                ret[key] = data[i]
+        return ret
+
+    @classmethod
+    def getAll(cls):
+        with PaperDBCursor() as (cursor, tableName):
+            data = cursor.execute('select * from %s'%(tableName)).fetchall()
+        return data
+
+    @classmethod
+    def getAllJson(cls):
+        with PaperDBCursor() as (cursor, tableName):
+            datas = cursor.execute('select * from %s'%(tableName)).fetchall()
+        rets = collections.OrderedDict([])
+        for data in datas:
+            ret = cls.getEmptyMeta()
+            for i, key in enumerate(ret):
+                ret[key] = data[i]
+            rets[ret['name']] = ret
+        return rets
+
+    @classmethod
+    def getAllNames(cls):
+        with PaperDBCursor() as (cursor, tableName):
+            data = cursor.execute('select name from %s'%(tableName)).fetchall()
+        return map(lambda x: x[0], data)
+
+    @classmethod
+    def find(cls, args):
+        import re
+        ret = []
+        with PaperDBCursor() as (cursor, tableName):
+            for col in args:
+                data = cursor.execute('select name, {0} from {1} where {2} like "%{3}%" '.format(col, tableName, col, args[col])).fetchall()
+                data1 = map(lambda x: [x[0], re.sub(args[col], Utils.colors.BROWN + args[col] + Utils.colors.ENDC, x[1], flags=re.I).replace('\n', '')], data)
+                if col == 'content':
+                    for i in range(len(data1)):
+                        place = [(a.start(), a.end()) for a in list(re.finditer(args[col], data1[i][1]))]
+                        itp = '\n\t'.join(map(lambda x: data1[i][1][max(0, x[0] - 40) : min(len(data1[i][1]), x[1] + 40)], place))
+                        data1[i][1] = itp
+                for i in range(len(data1)):
+                    data1[i][1] = Utils.colors.BLUE + col + '\t' + Utils.colors.ENDC  + ' : ' + data1[i][1]
+                ret += data1
+        ret1 = {}
+        for i in range(len(ret)):
+            if ret[i][0] not in ret1:
+                ret1[ret[i][0]] = []
+            ret1[ret[i][0]].append(ret[i][1].strip())
+        return ret1
+
+    @classmethod
+    def updateContent(cls, name, content):
+        with PaperDBCursor() as (cursor, tableName):
+            sqlcmd = 'update %s set content = ?  where name = "%s"'%(tableName, name)
+            cursor.execute(sqlcmd, (content,))
+
+class Utils():
     class colors:
         RED = '\033[31m'
         GREEN = '\033[32m'
@@ -53,28 +176,6 @@ class Utils(object):
         ENDC = '\033[0m'
         BOLD = '\033[1m'
         UNDERLINE = '\033[4m'
-
-    @staticmethod
-    def jsonToTable(jsonstr):
-        from texttable import Texttable
-        table = Texttable()
-        content = [['Name', 'Value']]
-        for key in jsonstr:
-            content.append([key, ',' .join(jsonstr[key].split('\n'))])
-        table.add_rows(content)
-        return table.draw()
-
-    @staticmethod
-    def jsonToTmpFile(tmppath, jsonstr):
-        with io.open(tmppath, "w", encoding='utf8') as f:
-            try:
-                f.write(json.dumps(jsonstr, sort_keys=False, indent=2, ensure_ascii=False).replace('\\n', '\n'))
-            except TypeError:
-                f.write(json.dumps(jsonstr, sort_keys=False, indent=2, ensure_ascii=False).replace('\\n', '\n').decode('utf-8'))
-
-    @staticmethod
-    def tmpFileTojson(tmppath):
-        return json.loads(open(tmppath, "r").read(), strict=False, object_pairs_hook=collections.OrderedDict) # strict=False to allow \n
 
     @staticmethod
     def printList(obj, cols=3, columnwise=True, gap=4):
@@ -109,13 +210,11 @@ class Utils(object):
         printer = '\n'.join([
             ''.join([c.ljust(max_len + gap) for c in p])
             for p in plist])
-        print printer
-
-
+        print(printer)
 
 class PaperManager(object):
-    def __init__(self):
-        self.ConerenceMap = collections.OrderedDict([
+    confPath = os.path.join(os.path.expanduser('~'), '.pa.conf')
+    ConerenceMap = collections.OrderedDict([
             ("Journal of Machine Learning Research", "JMLR"),
             ("Neural Computation", "NC"),
             ("IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE", "TPAMI"),
@@ -139,88 +238,81 @@ class PaperManager(object):
             ("IEEE", "IEEE"),
         ])
 
-        self.pmdb = DBManager(".pm")
+    @classmethod
+    def loadConf(cls):
+        if not os.path.exists(cls.confPath):
+            cf = {'libpath' : None}
+            cls.setConf(cf)
+            cls.saveConf()
+        cls.setConf(json.load(open(cls.confPath)))
+        return
 
-        '''parser = argparse.ArgumentParser(
-            description='Pretends to be pm',
-            usage="")
-        parser.add_argument('command', help='Subcommand to run')
-        # parse_args defaults to [1:] for args, but you need to
-        # exclude the rest of the args too, or validation will fail
-        args = parser.parse_args(sys.argv[1:2])
-        if not hasattr(self, args.command):
-            print 'Unrecognized command'
-            parser.print_help()
-            exit(1)
-        # use dispatch pattern to invoke method with same name
-        getattr(self, args.command)()'''
+    @classmethod
+    def getConf(cls):
+        if cls.conf is None:
+            cls.loadConf()
+        return cls.conf
 
+    @classmethod
+    def setConf(cls, conf):
+        cls.conf = conf
 
-    '''def init(self):
-        parser = argparse.ArgumentParser(
-            description='init paper manager repo in this directory.')
-        self.initImpl()'''
+    @classmethod
+    def saveConf(cls):
+        json.dump(cls.conf, open(cls.confPath, 'w'))
 
-    def init(self):
-        import os
-        os.system('mkdir -p .pm')
-        if os.path.exists('.pm'):
-            print 'folder .pm already exists.'
-            return
+    @classmethod
+    def getLibPath(cls):
+        libPath = PaperManager.getConf()['libpath']
+        if libPath is not None:
+            return libPath
+        else:
+            print("please set Library Dir with 'pa set --libpath /your/path/to/store/papers' ")
+            exit(0)
 
-    '''def add(self):
-        parser = argparse.ArgumentParser(
-            description='Add pdf papers into paper library.')
-        # NOT prefixing the argument with -- means it's not optional
-        parser.add_argument('pdfName')
-        args = parser.parse_args(sys.argv[2:])
-        self.addImpl(args.pdfName)'''
+    @classmethod
+    def getIndexPath(cls):
+        indexPath = os.path.join(cls.getLibPath(), '.index')
+        if not os.path.exists(indexPath):
+            os.mkdir(indexPath)
+        return indexPath
 
-    def add(self, pdfName):
+    @classmethod
+    def add(cls, filePath):
         from lxml import etree
-        if pdfName[:4] == 'http':
-            import urllib2
-            response = urllib2.urlopen(pdfName)
-            html = response.read()
-            parser = etree.XMLParser(recover=True)
-            tree = etree.XML(html, parser)
-            # for link
-            if tree:
-                title = tree.xpath('//title')
-                titletext = title[0].text if title else ""
-                html = "<text font=\"0\">%s</text>\n"%titletext
-                html += "<text myspecialdesitaggned=\"0\">%s</text>"%pdfName
-                html = html.encode('utf-8')
-                with open('.tmp/temp.pdf.xml', 'w') as f:
-                    f.write(html)
-            else:
-                with open('temp.pdf', 'w') as f:
-                    f.write(html)
-            pdfName = 'temp.pdf'
-        if os.path.isdir(pdfName):
-            for root, dirs, files in os.walk(pdfName):
+        if os.path.isdir(filePath):
+            for root, dirs, files in os.walk(filePath):
                 for file in files:
-                    if file[-4:] == '.pdf':
-                        self.addSingleFile(root, file)
-                        
-            return
-        if not os.path.exists(pdfName):
-            print 'File %s does not exists.'%(pdfName)
-            return
-        self.addSingleFile('', pdfName)
-        
-    def addSingleFile(self, rootpath, file):
-        from lxml import etree
-        import re
+                    if file[-4:] != '.pdf':continue
+                    PaperManager.add(os.path.abspath(os.path.join(root, file)))
+        else:
+            import urllib
+            fileName = os.path.basename(filePath)
+            response = urllib.urlopen(filePath.encode('utf-8'))
+            content = response.read()
+            if filePath[-4:] != '.pdf':
+                #content = content.encode('utf-8')
+                with TempPath() as tmpdir:
+                    tmpPath = os.path.join(tmpdir, fileName + '.xml') 
+                    with open(tmpPath, 'w') as f:
+                        f.write(content)
+                        tree = etree.HTML(content)
+                        PaperManager.addHTMLFile(tree, content, tmpdir, filePath)
+            else:# for pdf
+                with TempPath() as tmpdir:
+                    tmpPath = os.path.join(tmpdir, fileName)
+                    with open(tmpPath, 'w') as f:
+                        f.write(content)
+                    PaperManager.addPdfFile(tmpdir, fileName)
+    @classmethod
+    def addPdfFile(cls, tmpdir, fileName):
         import datetime
-        import json
-        pdfPath = os.path.join(rootpath, file)
-        if self.pmdb.get(file) is not None:
-            print 'The file %s is already in Library!'%(file)
-            return
-        os.system('mkdir -p .tmp')
-        os.system('pdftohtml -f 1 -l 1 -q %s -xml .tmp/%s.xml'%(pdfPath, file))
-        content = open('.tmp/%s.xml'%(file)).read()
+        from lxml import etree
+        import shutil
+        import html2text
+        filePath = os.path.join(tmpdir, fileName)
+        os.system('pdftohtml -f 1 -l 1 -q %s -xml %s.xml'%(filePath, filePath))
+        content = open('%s.xml'%(filePath)).read()
         years = [int(x) for x in re.findall(r'19\d\d|20\d\d', content)]
         years = years + [datetime.datetime.now().year] if len(years) == 0 else years
         year = max(filter(lambda x: x <= datetime.datetime.now().year, years))
@@ -230,7 +322,7 @@ class PaperManager(object):
         title = ' '.join([etree.tostring(e, encoding='utf8', method='text') for e in tree.xpath('//text[@font=0]')])#.encode('ascii',errors='ignore')
         al = [etree.tostring(e, encoding='utf8', method='text') for e in tree.xpath('//text[@font=1 or @font=2 or @font=3 or @font=4 or @font=5]')]
         # prevent page number to be title
-        if any(map(lambda x: x in title, self.ConerenceMap.keys())) or len(title) < 5 or 'arXiv' in title or 'Vol.' in title:
+        if any(map(lambda x: x in title, cls.ConerenceMap.keys())) or len(title) < 5 or 'arXiv' in title or 'Vol.' in title:
             title = ' '.join([e.text if not e.getchildren() else e.getchildren()[0].text for e in tree.xpath('//text[@font=1]')])#.encode('ascii',errors='ignore')
             al = [etree.tostring(e, encoding='utf8', method='text') for e in tree.xpath('//text[@font=2 or @font=3 or @font=4 or @font=5]')]
         weblink = ' '.join([etree.tostring(e, encoding='utf8', method='text') for e in tree.xpath('//text[@myspecialdesitaggned=0]')])
@@ -250,363 +342,397 @@ class PaperManager(object):
         #authors = ' '.join([e.text for e in tree.xpath('//text[@font=1]')])
         pcontent = etree.tostring(tree, encoding='utf8', method='text').replace('-\n', '').replace('\n', ' ')
         journal = "note"
-        for i in self.ConerenceMap:
+        for i in cls.ConerenceMap:
             if i in pcontent:
-                journal = self.ConerenceMap[i]
+                journal = cls.ConerenceMap[i]
                 break
         rename = '-'.join([str(year), journal, authors[0].split()[-1]]) + '.pdf'
+        rename = re.sub('[\%\/\<\>\^\|\?\&\#\*\\\:\" ]', '+', rename)
         authors1 = '\n'.join((a.strip() for a in authors))
         addTime = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.localtime(time.time()))
-        #datetime_object = datetime.strptime(addTime, "%a, %d %b %Y %H:%M:%S GMT")
-        
+        # make index
+        print('Begin indexing the file %s ...'%(rename))
+        os.system('pdftohtml -q "%s" -xml "%s.xml"'%(filePath, filePath))
+        content = open('%s.xml'%(filePath)).read()
+        h = html2text.HTML2Text()
+        h.ignore_links = True
+        content = h.handle(content)
+                
         outdata = collections.OrderedDict([
-            ("title", title),
-            ("authors", authors1),
-            ("year", str(year)),
-            ("journal", journal),
-            ("name", rename),
+            ("name", unicode(rename)),
+            ("title", unicode(title)),
+            ("authors", unicode(authors1)),
+            ("year", unicode(str(year))),
+            ("journal", unicode(journal)),        
             ("tags", ""),
             ("comment", ""),
             ("path", ""),
-            ("addTime", addTime),
-            ("updateTime", "")
+            ("link", ""),
+            ("addTime", unicode(addTime)),
+            ("updateTime", unicode(addTime)),
+            ("srcType", u"pdf"),
+            ("content", unicode(content))
         ])
-            
-        
-        
-        #with open(".tmp/%s.tmp"%(rename), "w") as f:
-        #    f.write(json.dumps(outdata, sort_keys=True, indent=2).replace('\\n', '\n'))
-        try:
-            input("Press enter to add %s into Library."%(file))
-        except SyntaxError:
-            pass
-        if not len(weblink):
-            os.system('open %s'%pdfPath)
+        # save to db
+        sf = 1
+        sfname = outdata['name']
+        names = set(PaperDB.getAllNames())
+        while sfname in names:
+            sfname = outdata['name'][:-4] + '.' + str(sf) + outdata['name'][-4:]
+            sf += 1
+        outdata['name'] = sfname
+        shutil.move(os.path.join(tmpdir, fileName), os.path.join(PaperManager.getLibPath(), outdata['name']))
+        PaperDB.insert(outdata)
+        print('%s has been added into the library.'%(outdata['name']))
+        # user edit
+        outdata = cls.editInfo(outdata['name'], tmpdir)
 
-        Utils.jsonToTmpFile(".tmp/%s.tmp"%(file), outdata)
-        
-        os.system("vim .tmp/%s.tmp"%(file))
+    @classmethod
+    def addHTMLFile(cls, tree, content, tmpdir, filePath):
+        from urlparse import urlparse
+        import datetime
+        import html2text
+        title = tree.xpath('//title')
+        titletext = title[0].text if title else ""
+        years = [int(x) for x in re.findall(r'19\d\d|20\d\d', content)]
+        years = years + [datetime.datetime.now().year] if len(years) == 0 else years
+        year = max(filter(lambda x: x <= datetime.datetime.now().year, years))
+        website = urlparse(filePath).netloc
+        rename = str(year) + '-' + website + '-' + os.path.basename(filePath)
+        rename = re.sub('[\%\/\<\>\^\|\?\.\&\#\*\\\:\" ]', '+', rename)
+        addTime = time.strftime("%a, %d %b %Y %H:%M:%S GMT+8", time.localtime(time.time()))
+        # make index
+        print('Begin indexing the file %s ...'%(rename))
+        h = html2text.HTML2Text()
+        h.ignore_links = True
+        content = h.handle(content)
+        outdata = collections.OrderedDict([
+            ("name", unicode(rename)),
+            ("title", unicode(titletext)),
+            ("authors", ""),
+            ("year", unicode(str(year))),
+            ("journal", unicode(website)),
+            ("tags", ""),
+            ("comment", ""),
+            ("path", ""),
+            ("link", unicode(filePath)),
+            ("addTime", unicode(addTime)),
+            ("updateTime", unicode(addTime)),
+            ("srcType", "web"),
+            ("content", unicode(content))
+        ])
+        # save to db
+        sf = 1
+        sfname = outdata['name']
+        names = set(PaperDB.getAllNames())
+        while sfname in names:
+            sfname = outdata['name'] + '.' + str(sf)
+            sf += 1
+        outdata['name'] = sfname
+        PaperDB.insert(outdata)
+        outdata = cls.editInfo(outdata['name'], tmpdir)
+        print('%s has been added into the Library.'%(outdata['name']))
+
+    @classmethod
+    def editInfo(cls, name, tmpdir):
+        import sqlite3
+        import shutil
+        outdata = PaperDB.getMeta(name)
+        tmpMetaPath = os.path.join(tmpdir, name + '.tmp')
+        json.dump(outdata, open(tmpMetaPath, 'w'), sort_keys=False, indent=2, ensure_ascii=False)
+        oriname = outdata['name']
         while True:
             try:
-                userjson = Utils.tmpFileTojson(".tmp/%s.tmp"%(file))
-                break
+                print("Press enter to edit %s information.[y/n]"%(outdata['name']))
+                with ReadChar() as rc:
+                    if 'n' == rc: 
+                        return outdata
+                    if ord(rc) == 3:exit(0)                       
+                os.system("vim %s"%(tmpMetaPath))
+                userjson = json.load(open(tmpMetaPath), strict=False, object_pairs_hook=collections.OrderedDict)
+                userjson['path'] = userjson['name']
+                PaperDB.update(oriname, userjson)
+                if oriname != userjson['name']:
+                    shutil.move(os.path.join(PaperManager.getLibPath(), oriname), os.path.join(PaperManager.getLibPath(), userjson['name']))
+                return userjson
             except ValueError:
-                try:
-                    input("Format Error, please re-edit %s."%(file))
-                except SyntaxError:
-                    pass
-                os.system("vim .tmp/%s.tmp"%(file))
+                print("Format Error, please re-edit %s."%(outdata['name']))
+                with ReadChar() as rc:
+                    if ord(rc) == 3:exit(0)   
+            except sqlite3.IntegrityError:
+                print("File name Error, the name is already exists in Library, please re-edit %s."%(outdata['name']))
+                with ReadChar() as rc:
+                    if ord(rc) == 3:exit(0)   
+        
+    @classmethod
+    def addItemIndex(cls, name, content):
+        content = content.replace('\r', '')
+        content = content.replace('\n', '')
+        with open(os.path.join(cls.getIndexPath(), name), 'w') as f:
+            f.write(content)
 
-        userjson = json.loads(open(".tmp/%s.tmp"%(file), "r").read(), strict=False, object_pairs_hook=collections.OrderedDict) # strict=False to allow \n
-        userjson['path'] = os.path.join(rootpath, userjson['name'])
-        os.system('mv %s %s'%(pdfPath, userjson['path']))
-        self.pmdb.insert(userjson)
-        os.system('rm -rf .tmp')
-
-        self.indexOneFile(rename, userjson['path'])
-
-    '''def rm(self):
-        parser = argparse.ArgumentParser(
-            description='Remove pdf papers in the library.')
-        # NOT prefixing the argument with -- means it's not optional
-        parser.add_argument('name')
-        args = parser.parse_args(sys.argv[2:])
-        self.rmImpl(args.name)'''
-
-    def rm(self, name):
-        self.pmdb.remove(name)
-        os.system('rm .pm/index/%s.txt'%(name))
-
-    '''def ls(self):
-        parser = argparse.ArgumentParser(
-            description='Show all paper names in the library.')
-        self.lsImpl()'''
-
-    def ls(self):
-        al = self.pmdb.all()
-        al1 = [i['name'] for i in al]
-        al1.sort()
-        Utils.printList(al1)
-
-    '''def edit(self):
-        parser = argparse.ArgumentParser(
-            description='Update pdf info in the library.')
-        # NOT prefixing the argument with -- means it's not optional
-        parser.add_argument('name')
-        args = parser.parse_args(sys.argv[2:])
-        self.updateImpl(args.name)'''
-
-    def info(self, name):
-        data = self.pmdb.get(name)
+    @classmethod
+    def rm(cls, name):
+        data = PaperDB.getMeta(name)
         if data is None:
-             print 'This file doesn\'t exists in the library!'
-             return
-        os.system('mkdir -p .tmp')
-        Utils.jsonToTmpFile('.tmp/%s.tmp'%data['name'], data)
-        os.system('vim .tmp/%s.tmp'%data['name'])
-        ndata = Utils.tmpFileTojson('.tmp/%s.tmp'%data['name'])
-        os.system('rm -rf .tmp')
-        updateTime = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.localtime(time.time()))
-        ndata['updateTime'] = updateTime
-        if 'addTime' not in ndata:
-            ndata['addTime'] = updateTime
-        self.pmdb.remove(name)
-        self.pmdb.insert(ndata)
+            print('%s is not found!'%(name))
+            exit(0)
+        filePath =  os.path.join(cls.getLibPath(), data['path'])
+        if os.path.exists(filePath):
+            os.remove(filePath)
+        PaperDB.delete(name)
 
-    def show(self):
-        parser = argparse.ArgumentParser(
-            description='Show pdf info in the library.')
-        # NOT prefixing the argument with -- means it's not optional
-        parser.add_argument('name')
-        args = parser.parse_args(sys.argv[2:])
-        self.showImpl(args.name)
+    @classmethod
+    def edit(cls, name):
+        outdata = PaperDB.getMeta(name)
+        if outdata is None:
+            print("%s is not found!"%(name))
+            exit(0)
+        with TempPath() as tmpdir:
+            cls.editInfo(outdata['name'], tmpdir)
 
-    def showImpl(self, name):
-        data = self.pmdb.get(name)
-        if data is None:
-            raise UserException('File %s is not in Library.'%name)
-        print Utils.jsonToTable(data)
+    @classmethod
+    def show(cls, name):
+        outdata = PaperDB.getMeta(name)
+        for i in outdata:
+            print(Utils.colors.BLUE + '%10s: '%(i) + Utils.colors.ENDC + outdata[i].strip())
 
-    def tags(self):
-        allent = self.pmdb.all()
-        result = {}
-        for atc in allent:
-            for t in atc['tags'].split(','):
-                result[t] = 1 if t not in result else result[t] + 1
-        result1 = [i + ': ' + str(result[i]) for i in result]
-        result1.sort()
-        Utils.printList(result1)
+    @classmethod
+    def ls(cls):
+        names = PaperDB.getAllNames()
+        Utils.printList(names)
 
-    def status(self):
-        parser = argparse.ArgumentParser(
-            description='Show status in the library.')
-        self.statusImpl()
+    @classmethod
+    def find(cls, args):
+        argdict = vars(args)
+        npars = collections.OrderedDict([])
+        for par in argdict:
+            if par == 'keywords' or par == 'func':
+                continue
+            if argdict[par] != None:
+                npars[par] = argdict['keywords']
+        if len(npars) == 0:
+            npars = PaperDB.getEmptyMeta()
+            del npars['addTime']
+            del npars['updateTime']
+            del npars['srcType']
+            del npars['path']
+            for i in npars:
+                npars[i] = argdict['keywords']
+        result = PaperDB.find(npars)
 
-    def statusImpl(self):
-        addedFiles = []
-        al = self.pmdb.all()
-        for i in al:
-            addedFiles.append(i['name'])
-        addedFilesSet = set(addedFiles)
-        unadded = []
-        for root, dirs, files in os.walk('.'):
-            for file in files:
-                if file[-4:] == '.pdf':
-                    if file not in addedFilesSet:
-                        unadded.append(os.path.join(root, file))
-        print "Added Files:"
-        Utils.printList(addedFiles)
-        print "Unadded Files:"
-        Utils.printList(unadded)
+        for i in result:
+            print ('-'*80)
+            print (Utils.colors.BOLD + i + Utils.colors.ENDC)
+            print (os.path.join(cls.getLibPath(), i))
+            print ('\n'.join(result[i]))
 
-    def findItemsWithNoTags(self):
-        allent = self.pmdb.all()
-        result = []
-        for atc in allent:
-            if atc['tags'] == "":
-                result.append(atc['name'])
-        print '\n'.join(result)
+    @classmethod
+    def exportjson(cls, path):
+        data = PaperDB.getAllJson()
+        json.dump(data, open(path, 'w'), sort_keys=False, indent=2, ensure_ascii=False)
 
-    def showJsonAsTable(self, jsonmap):
-        from texttable import Texttable
-        table = Texttable()
-        content = [['Name', 'Value']]
-        for key in jsonmap:
-            content.append([key, ',' .join(str(jsonmap[key]).split('\n'))])
-        table.add_rows(content)
-        print table.draw()
+    @classmethod
+    def importjson(cls, path):
+        rcdjsons = json.load(open(path), strict=False, object_pairs_hook=collections.OrderedDict)
+        names = set(PaperDB.getAllNames())
+        for rcd in rcdjsons:
+            if rcd in names:
+                print('%s already exists in Library.'%(rcd))
+                exit(0)
+        for rcd in rcdjsons:
+            newRecord = PaperDB.getEmptyMeta()
+            for i in newRecord:
+                if i in rcdjsons[rcd]:
+                    newRecord[i] = rcdjsons[rcd][i]
+            PaperDB.insert(newRecord)
 
-    def reindex(self):
-        al = self.pmdb.all()
-        os.system('rm -rf .pm/index')
-        os.system('mkdir -p .pm/index')
-        for i in al:
-            self.indexOneFile(i['name'], i['path'])
+    @classmethod
+    def updateAllContent(cls):
+        names = PaperDB.getAllNames()
+        for i, name in enumerate(names):
+            print(i, '/', len(names), name)
+            cls.updateContent(name)
 
-    def indexOneFile(self, name, path):
-        from lxml import etree
-        os.system('mkdir -p .tmp')
-        os.system('pdftohtml -q %s -xml .tmp/%s.xml'%(path, name))
-        content = open('.tmp/%s.xml'%(name)).read()
-        parser = etree.XMLParser(recover=True)
-        tree = etree.XML(content, parser)
-        pcontent = etree.tostring(tree, encoding='utf8', method='text').replace('-\n', '')
-        with open('.pm/index/%s.txt'%(name), "w") as f:
-            f.write(pcontent)
-        os.system('rm -rf .tmp')
-        print path, 'info have been made.'
-
-
-    def find(self, keyword, head, tags, authors, body, comment, outhead, outtags, outauthors, outcomment):
-        foundFiles = {}
-        al = self.pmdb.all()
-        infoMap = {}
-        resultMap = {}
-        for i in al:
-            infoMap[i['name']] = i
-            thisResult = {}
-            if head and keyword in i['title']:
-                thisResult['head'] = i['title'].replace(keyword, Utils.colors.BROWN + keyword + Utils.colors.ENDC)
-            if tags and keyword in i['tags']:
-                thisResult['tags'] = i['tags'].replace(keyword, Utils.colors.BROWN + keyword + Utils.colors.ENDC)
-            if authors and keyword in i['authors']:
-                thisResult['authors'] = i['authors'].replace(keyword, Utils.colors.BROWN + keyword + Utils.colors.ENDC).replace('\n', ', ')
-            if body != 0:
-                with open('.pm/index/' + i['name'] + '.txt', 'r') as f:
-                    rs = filter(lambda x: keyword in x, map(lambda x: x.decode('utf-8'), f.readlines()))[:body]
-                if len(rs) != 0:
-                    thisResult['body'] = '\n\t'.join(map(lambda x:x[max(0, x.find(keyword) - 40) : min(len(x), x.find(keyword) + 40)].strip().replace(keyword, Utils.colors.BROWN + keyword + Utils.colors.ENDC), rs))
-            if comment and keyword in i['comment']:
-                thisResult['comment'] = i['comment'].replace(keyword, Utils.colors.BROWN + keyword + Utils.colors.ENDC).replace('\n', '\t\n')
-            if thisResult != {}:
-                resultMap[i['name']] = thisResult
+    @classmethod
+    def updateContent(cls, name):
+        import urllib
+        import html2text
+        meta = PaperDB.getMeta(name)
+        if meta['link'] == '':
+            filePath = os.path.join(cls.getLibPath(), meta['name'])
+        else:
+            filePath = meta['link']
+        response = urllib.urlopen(filePath.encode('utf-8'))
+        content = response.read()
+        with TempPath() as tmpdir:
+            tmpPath = os.path.join(tmpdir, name)
+            with open(tmpPath, 'w') as f:
+                f.write(content)
+            if meta['link'] == '':
+                os.system('pdftohtml -q "%s" -xml "%s.xml"'%(tmpPath, tmpPath))
+                content = open('%s.xml'%(tmpPath)).read()
+                h = html2text.HTML2Text()
+                h.ignore_links = True
+                content = h.handle(content)
+            else:
+                h = html2text.HTML2Text()
+                h.ignore_links = True
+                content = h.handle(content)
+        PaperDB.updateContent(name, content)
 
 
-        for i in resultMap:
-            print '-'*80
-            print Utils.colors.BOLD + i + Utils.colors.ENDC
-            for j in resultMap[i]:
-                print '\t' + resultMap[i][j]
-            if outhead:
-                print '\t' + infoMap[i]['title']
-            if outtags:
-                print '\t' + infoMap[i]['tags']
-            if outauthors:
-                print '\t' + infoMap[i]['authors'].replace('\n', ', ')
-            if outcomment:
-                print '\t' + infoMap[i]['comment']
-
-        '''if article:
-            with open('.pm/index/' + i['name'] + '.txt', 'r') as f:
-                rs = filter(lambda x: keyword in x, map(lambda x: x.decode('utf-8'), f.readlines()))
-                if len(rs) != 0:
-                    foundFiles[i['name']] = rs if i['name'] not in foundFiles else foundFiles[i['name']] + rs
-                    if title:
-            if keyword in i['title']:
-                rs = [i['title']]
-                foundFiles[i['name']] = rs if i['name'] not in foundFiles else foundFiles[i['name']] + rs'''
-
-        '''for root, dirs, files in os.walk('.pm/index'):
-            for file in files:
-                if file[-4:] == '.txt':
-                    pdfPath = os.path.join(root, file)
-                    with open(pdfPath, 'r') as f:
-                        rs = filter(lambda x: keyword in x, map(lambda x: x.decode('utf-8'), f.readlines()))
-                        if len(rs) != 0:
-                            foundFiles[file] = rs
-        for f in foundFiles:
-            print '-'*80
-            print f
-            for i in foundFiles[f][:line]:
-                print '\t', i[max(0, i.find(keyword) - 40) : min(len(i), i.find(keyword) + 40)].strip()
-            if title:
-                print 'title:', infoMap[f]['title']
-            if comment:
-                print 'comment:', infoMap[f]['comment']
-            if tags:
-                print 'tags:', infoMap[f]['tags']'''
-
-pm = PaperManager()
-
-
-@click.group()
-@click.pass_context
-def cli(ctx):
-    pass
-
-@cli.command()
-def init():
+def config(args):
     """
-    Init paper manager repo in this directory.
+    config parameters in conf file.
     """
-    pm.init()
+    conf = PaperManager.getConf()
+    if args.libpath:
+        conf['libpath'] = os.path.abspath(os.path.expanduser(args.libpath))
+        PaperManager.setConf(conf)
+        PaperManager.saveConf()
 
-@cli.command()
-@click.argument('pdfname')
-def add(pdfname):
+def add(args):
     """
-    Add file or download file by url.
+    Add documents or urls to the library.
     """
-    pm.add(pdfname)
+    PaperManager.add(args.filePath)
 
-@cli.command()
-def ls():
+def rm(args):
     """
-    List all added files.
+    Remove documents or urls in the library.
     """
-    pm.ls()
+    PaperManager.rm(args.name)
 
-@cli.command()
-@click.argument('pdfname')
-def rm(pdfname):
+def edit(args):
     """
-    Remove file from the Library.
+    Update documents or urls in the library.
     """
-    pm.rm(pdfname)
+    PaperManager.edit(args.name)
 
-@cli.command()
-@click.argument('pdfname')
-def info(pdfname):
+def show(args):
     """
-    Edit the information of each file.
+    Show document information.
     """
-    pm.info(pdfname)
+    PaperManager.show(args.name)
 
-@cli.command()
-def reindex():
+def dumpJson(args):
     """
-    Rebuild the search information for each pdf file.
+    Dump database as json.
     """
-    pm.reindex()
+    data = PaperDB.getAll()
+    if args.path:
+        with open(args.path, 'w') as f:
+            f.write(data)
+    else:
+        print (data)
 
-@cli.command()
-def tags():
+def ls(args):
     """
-    Show all tags in the library.
+    List document names in the library.
     """
-    pm.tags()
+    PaperManager.ls() 
 
-@cli.command()
-@click.argument('keyword')
+def find(args):
+    """
+    Find keywords in the library.
+    """
+    PaperManager.find(args)
 
-@click.option('--head', '-h', is_flag=True,
-              help='Find by head lines.')
-@click.option('--tags', '-t', is_flag=True,
-              help='Find by tags.')
-@click.option('--author', '-a', is_flag=True,
-              help='Find by authors.')
-@click.option('--body', '-b', default=0,
-              help='Find by article body with in specific line number.')
-#@click.option('--bodyline', '-l', default=3,
-#              help='Show article body with in specific line number.')
-@click.option('--comment', '-c', is_flag=True,
-              help='Find by my comments.')
-@click.option('--outhead', '-oh', is_flag=True,
-              help='Show head lines.')
-@click.option('--outtags', '-ot', is_flag=True,
-              help='Show tags.')
-@click.option('--outauthor', '-oa', is_flag=True,
-              help='Show authors.')
-@click.option('--outcomment', '-oc', is_flag=True,
-              help='Show my comments.')
-def find(keyword, head, tags, author, body, comment, outhead, outtags, outauthor, outcomment):
-    """
-    Find papers by keywords.
-    """
-    if head == False and tags == False and author == False and body == 0 and comment == False:
-        body = 3
-        head = True
-        tags = True
-        author = True
-    pm.find(keyword, head, tags, author, body, comment, outhead, outtags, outauthor, outcomment)
+def exportjson(args):
+    PaperManager.exportjson(args.path)
+
+def importjson(args):
+    PaperManager.importjson(args.path)
+
+def updateContent(args):
+    PaperManager.updateContent(args.name)
+
+def updateAllContent(args):
+    PaperManager.updateAllContent()
 
 def main():
-    os.system('mkdir -p .tmp')
-    cli()
-    os.system('rm .tmp')
+    PaperManager.loadConf()
+    parser = argparse.ArgumentParser(prog='pa')
+    subparsers = parser.add_subparsers(title='subcommands')
+    # config
+    parser_config = subparsers.add_parser('config', help='Config user configs')
+    parser_config.add_argument('--libpath', metavar='PATH', required = True,
+                               help='set Library Dir that store all ducuments.')
+    parser_config.set_defaults(func=config)
+    # add
+    parser_add = subparsers.add_parser('add', help='Add documents or urls to the library.')
+    parser_add.add_argument('filePath', metavar='PATH',
+                               help='Path of the file(s) that you want to store.')
+    parser_add.set_defaults(func=add)
+    # rm
+    parser_rm = subparsers.add_parser('rm', help='Remove documents or urls in the library.')
+    parser_rm.add_argument('name', metavar='NAME',
+                               help='Name of the file(s) that you want to remove.')
+    parser_rm.set_defaults(func=rm)
+    # edit
+    parser_edit = subparsers.add_parser('edit', help='Edit documents meta in the library.')
+    parser_edit.add_argument('name', metavar='NAME',
+                               help='Name of the file(s) that you want to edit.')
+    parser_edit.set_defaults(func=edit)
+    # ls
+    parser_ls = subparsers.add_parser('ls', help='List document names in the library.')
+    parser_ls.set_defaults(func=ls)
+    # show
+    parser_show = subparsers.add_parser('show', help='show document information.')
+    parser_show.add_argument('name', metavar='NAME',
+                               help='Name of the file(s) that you want to show.')
+    parser_show.set_defaults(func=show)
+    # dump
+    parser_dump = subparsers.add_parser('dump', help='Dump the database of the library.')
+    parser_dump.add_argument('--path', metavar='JSONPATH', default = None,
+                               help='Name of the file(s) that you want to remove.')
+    parser_dump.set_defaults(func=dumpJson)
+    # find
+    parser_find = subparsers.add_parser('find', help='Find the database of the library.')
+    parser_find.add_argument('keywords', metavar='KEYWORDS', default = None,
+                               help='Keywords that you want to find in the library.')
+    parser_find.add_argument('--name', default = None, action='store_true',
+                               help='Search keywords in file name.')
+    parser_find.add_argument('--title', default = None, action='store_true',
+                               help='Search keywords in title.')
+    parser_find.add_argument('--authors', default = None, action='store_true',
+                               help='Search keywords in authors.')
+    parser_find.add_argument('--year', default = None, action='store_true',
+                               help='Search keywords in year.')
+    parser_find.add_argument('--journal', default = None, action='store_true',
+                               help='Search keywords in journal.')
+    parser_find.add_argument('--tags', default = None, action='store_true',
+                               help='Search keywords in tags.')
+    parser_find.add_argument('--comment', default = None, action='store_true',
+                               help='Search keywords in comment.')
+    parser_find.add_argument('--content', default = None, action='store_true',
+                               help='Search keywords in content.')
+    parser_find.set_defaults(func=find)
+    # export
+    parser_export = subparsers.add_parser('export', help='Export library to json.')
+    parser_export.add_argument('path', metavar='JSONPATH',
+                               help='Path of the file(s) that you want to save.')
+    parser_export.set_defaults(func=exportjson)
+    # import
+    parser_import = subparsers.add_parser('import', help='Import json file into library.')
+    parser_import.add_argument('path', metavar='JSONPATH',
+                               help='Path of the file(s) that you want to import.')
+    parser_import.set_defaults(func=importjson)
+    # updateContent
+    parser_updateContent = subparsers.add_parser('updateContent', help='Update file\'s content in the library.')
+    parser_updateContent.add_argument('name', metavar='RECORD',
+                               help='Name of the record that you want to update.')
+    parser_updateContent.set_defaults(func=updateContent)
+    # updateAllContent
+    parser_updateAllContent = subparsers.add_parser('updateAllContent', help='Update all records\' content in the library.')
+    parser_updateAllContent.set_defaults(func=updateAllContent)
+
+    args = parser.parse_args()
+    args.func(args)
 
 if __name__ == '__main__':
     main()
 
-
+    
 

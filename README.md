@@ -20,7 +20,7 @@ Paper Arxiv is a command line base academic paper management tool. It provide an
 
 
 ## Install
-```
+```bash
 brew install pdftohtml # for mac
 sudo apt-get install pdftohtml # for Ubuntu
 pip install pa
@@ -29,7 +29,7 @@ pa config --libpath /Path/To/Store/Library
 
 ## Usage
 Here is a small example showing how to manage your file. For more details plseas refer to `pa --h`
-```
+```bash
 cd your_floder_storing_pdf_files
 pa add slide.pdf
 pa add https://arxiv.org/pdf/1701.02720.pdf

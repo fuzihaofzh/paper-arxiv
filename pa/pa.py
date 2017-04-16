@@ -38,7 +38,7 @@ class TempPath:
 
     def __exit__(self, type, value, traceback):
         import shutil
-        #shutil.rmtree(self.temPath)
+        shutil.rmtree(self.temPath)
 
 class PaperDBCursor():
     def __init__(self):
@@ -143,10 +143,10 @@ class PaperDB():
         with PaperDBCursor() as (cursor, tableName):
             for col in args:
                 data = cursor.execute('select name, {0} from {1} where {2} like "%{3}%" '.format(col, tableName, col, args[col])).fetchall()
-                data1 = map(lambda x: [x[0], re.sub(args[col], Utils.colors.BROWN + args[col] + Utils.colors.ENDC, x[1], flags=re.I).replace('\n', '')], data)
+                data1 = map(lambda x: [x[0], re.sub(r'(?i)(%s)'%(args[col]), r'%s\1%s'%(Utils.colors.BROWN, Utils.colors.ENDC), x[1]).replace('\n', ' ')], data)
                 if col == 'content':
                     for i in range(len(data1)):
-                        place = [(a.start(), a.end()) for a in list(re.finditer(args[col], data1[i][1]))]
+                        place = [(a.start(), a.end()) for a in list(re.finditer(args[col], data1[i][1], re.I))]
                         itp = '\n\t'.join(map(lambda x: data1[i][1][max(0, x[0] - 40) : min(len(data1[i][1]), x[1] + 40)], place))
                         data1[i][1] = itp
                 for i in range(len(data1)):
@@ -320,6 +320,7 @@ class PaperManager(object):
         tree = etree.XML(content, parser)
         # extract title and authors
         title = ' '.join([etree.tostring(e, encoding='utf8', method='text') for e in tree.xpath('//text[@font=0]')])#.encode('ascii',errors='ignore')
+        title = title.replace('\n', ' ')
         al = [etree.tostring(e, encoding='utf8', method='text') for e in tree.xpath('//text[@font=1 or @font=2 or @font=3 or @font=4 or @font=5]')]
         # prevent page number to be title
         if any(map(lambda x: x in title, cls.ConerenceMap.keys())) or len(title) < 5 or 'arXiv' in title or 'Vol.' in title:
@@ -393,7 +394,7 @@ class PaperManager(object):
         import datetime
         import html2text
         title = tree.xpath('//title')
-        titletext = title[0].text if title else ""
+        titletext = title[0].text.replace('\n', ' ') if title else ""
         years = [int(x) for x in re.findall(r'19\d\d|20\d\d', content)]
         years = years + [datetime.datetime.now().year] if len(years) == 0 else years
         year = max(filter(lambda x: x <= datetime.datetime.now().year, years))
@@ -463,13 +464,6 @@ class PaperManager(object):
                 print("File name Error, the name is already exists in Library, please re-edit %s."%(outdata['name']))
                 with ReadChar() as rc:
                     if ord(rc) == 3:exit(0)   
-        
-    @classmethod
-    def addItemIndex(cls, name, content):
-        content = content.replace('\r', '')
-        content = content.replace('\n', '')
-        with open(os.path.join(cls.getIndexPath(), name), 'w') as f:
-            f.write(content)
 
     @classmethod
     def rm(cls, name):
@@ -477,7 +471,7 @@ class PaperManager(object):
         if data is None:
             print('%s is not found!'%(name))
             exit(0)
-        filePath =  os.path.join(cls.getLibPath(), data['path'])
+        filePath =  os.path.join(cls.getLibPath(), data['name'])
         if os.path.exists(filePath):
             os.remove(filePath)
         PaperDB.delete(name)
@@ -496,6 +490,7 @@ class PaperManager(object):
         outdata = PaperDB.getMeta(name)
         for i in outdata:
             print(Utils.colors.BLUE + '%10s: '%(i) + Utils.colors.ENDC + outdata[i].strip())
+        print(os.path.join(cls.getLibPath(), name))
 
     @classmethod
     def ls(cls):

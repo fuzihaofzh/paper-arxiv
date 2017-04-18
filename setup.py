@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='pa',
-    version='0.0.17.dev',
+    version='0.0.18.dev',
     description='Paper Arxiv: A command line based academic paper management tool.',
     url='',
     author='',

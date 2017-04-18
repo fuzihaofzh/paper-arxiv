@@ -25,6 +25,12 @@ class ReadChar():
         import tty, sys, termios
         termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_settings)
 
+def getchar(info = None):
+    if info is not None:
+        print(info)
+    with ReadChar() as rc:
+        return rc
+
 class TempPath:
     def __init__(self):
         self.temPath = os.path.join(PaperManager.getLibPath(), '.tmp')
@@ -38,7 +44,7 @@ class TempPath:
 
     def __exit__(self, type, value, traceback):
         import shutil
-        shutil.rmtree(self.temPath)
+        #shutil.rmtree(self.temPath)
 
 class PaperDBCursor():
     def __init__(self):
@@ -386,7 +392,10 @@ class PaperManager(object):
         PaperDB.insert(outdata)
         print('%s has been added into the library.'%(outdata['name']))
         # user edit
-        outdata = cls.editInfo(outdata['name'], tmpdir)
+        rc = getchar("Press enter to edit %s information.[y/n]"%(outdata['name']))
+        if 'n' == rc: return
+        elif ord(rc) == 3:exit(0) 
+        else:outdata = cls.editInfo(outdata['name'], tmpdir)
 
     @classmethod
     def addHTMLFile(cls, tree, content, tmpdir, filePath):
@@ -431,8 +440,12 @@ class PaperManager(object):
             sf += 1
         outdata['name'] = sfname
         PaperDB.insert(outdata)
-        outdata = cls.editInfo(outdata['name'], tmpdir)
         print('%s has been added into the Library.'%(outdata['name']))
+        # user edit
+        rc = getchar("Press enter to edit %s information.[y/n]"%(outdata['name']))
+        if 'n' == rc: return
+        elif ord(rc) == 3:exit(0) 
+        else:outdata = cls.editInfo(outdata['name'], tmpdir)
 
     @classmethod
     def editInfo(cls, name, tmpdir):
@@ -443,18 +456,14 @@ class PaperManager(object):
         json.dump(outdata, open(tmpMetaPath, 'w'), sort_keys=False, indent=2, ensure_ascii=False)
         oriname = outdata['name']
         while True:
-            try:
-                print("Press enter to edit %s information.[y/n]"%(outdata['name']))
-                with ReadChar() as rc:
-                    if 'n' == rc: 
-                        return outdata
-                    if ord(rc) == 3:exit(0)                       
+            try:                     
                 os.system("vim %s"%(tmpMetaPath))
                 userjson = json.load(open(tmpMetaPath), strict=False, object_pairs_hook=collections.OrderedDict)
                 userjson['path'] = userjson['name']
                 PaperDB.update(oriname, userjson)
-                if oriname != userjson['name']:
+                if oriname != userjson['name'] and 'pdf' == userjson['srcType']:
                     shutil.move(os.path.join(PaperManager.getLibPath(), oriname), os.path.join(PaperManager.getLibPath(), userjson['name']))
+                print('%s has been updated.'%(userjson['name'])) 
                 return userjson
             except ValueError:
                 print("Format Error, please re-edit %s."%(outdata['name']))
@@ -463,7 +472,7 @@ class PaperManager(object):
             except sqlite3.IntegrityError:
                 print("File name Error, the name is already exists in Library, please re-edit %s."%(outdata['name']))
                 with ReadChar() as rc:
-                    if ord(rc) == 3:exit(0)   
+                    if ord(rc) == 3:exit(0)
 
     @classmethod
     def rm(cls, name):

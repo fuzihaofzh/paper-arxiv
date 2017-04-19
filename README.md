@@ -15,7 +15,7 @@ Paper Arxiv is a command line based academic paper management tool. It provides 
 ## Highlights
 - **Automatic Information Extraction**: It can extract information from pdf files, websites and generate default meta information.
 - **Multi File Source**: You can add local files, URL links, websites.
-- **Portable**: all information is sotred in one folder and you can put in your cloud disk.
+- **Portable**: all information is stored in one folder and you can put in your cloud disk.
 - **Search Everything**: You can use its powerful find tool to find whatever you want.
 
 

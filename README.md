@@ -28,7 +28,7 @@ pa config --libpath /Path/To/Store/Library
 ```
 
 ## Usage
-Here is a small example showing how to manage your file. For more details plseas refer to `pa --h`
+Here is a small example showing how to manage your file. For more details plseas refer to `pa --help`
 ```bash
 cd your_floder_storing_pdf_files
 pa add slide.pdf
@@ -36,6 +36,8 @@ pa add https://arxiv.org/pdf/1701.02720.pdf
 pa find VAE
 pa -h
 ```
-
-## TODO
-- [ ] add test cases
+nk rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-fork-ribbon-css/0.2.0/gh-fork-ribbon.min.css" />
+<!--[if lt IE 9]>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-fork-ribbon-css/0.2.0/gh-fork-ribbon.ie.min.css" />
+<![endif]-->
+<a class="github-fork-ribbon" href="https://github.com/maplewizard/paper-arxiv" title="Fork me on GitHub">Fork me on GitHub</a>

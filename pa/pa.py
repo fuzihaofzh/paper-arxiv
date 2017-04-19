@@ -232,6 +232,7 @@ class PaperManager(object):
             ("Empirical Methods in Natural Language Processing", "EMNLP"),
             ("Association for Computational Linguistics", "ACL"),
             ("International Joint Conference on Artificial Intelligence", "IJCAI"),
+            ("Springer Nature", "Nature"),
             ("ICLR", "ICLR"),
             ("Mach Learn", "ML"),
             ("NAACL", "NAACL"),
@@ -497,6 +498,9 @@ class PaperManager(object):
     @classmethod
     def show(cls, name):
         outdata = PaperDB.getMeta(name)
+        if outdata is None:
+            print('%s does not exist in the library.'%(name))
+            return
         for i in outdata:
             print(Utils.colors.BLUE + '%10s: '%(i) + Utils.colors.ENDC + outdata[i].strip())
         print(os.path.join(cls.getLibPath(), name))

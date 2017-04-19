@@ -44,7 +44,7 @@ class TempPath:
 
     def __exit__(self, type, value, traceback):
         import shutil
-        #shutil.rmtree(self.temPath)
+        shutil.rmtree(self.temPath)
 
 class PaperDBCursor():
     def __init__(self):
@@ -220,38 +220,40 @@ class Utils():
 
 class PaperManager(object):
     confPath = os.path.join(os.path.expanduser('~'), '.pa.conf')
-    ConerenceMap = collections.OrderedDict([
-            ("Journal of Machine Learning Research", "JMLR"),
-            ("Neural Computation", "NC"),
-            ("IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE", "TPAMI"),
-            ("International World Wide Web Conference", "WWW"),
-            ("Association for the Advancement of Artificial Intelligence", "AAAI"),
-            ("Association for the Advancement of Artiﬁcial Intelligence", "AAAI"),
-            ("American Association for Artificial Intelligence", "AAAI"),
-            ("International Conference on Machine Learning", "ICML"),
-            ("Empirical Methods in Natural Language Processing", "EMNLP"),
-            ("Association for Computational Linguistics", "ACL"),
-            ("International Joint Conference on Artificial Intelligence", "IJCAI"),
-            ("Springer Nature", "Nature"),
-            ("ICLR", "ICLR"),
-            ("Mach Learn", "ML"),
-            ("NAACL", "NAACL"),
-            ("ECCV", "ECCV"),
-            ("SIGKDD", "SIGKDD"),
-            ("SIGMOD", "SIGMOD"),
-            ("ACM", "ACM"),
-            ("arXiv", "arXiv"),
-            ("Computer", "Computer"),
-            ("IEEE", "IEEE"),
-        ])
 
     @classmethod
     def loadConf(cls):
         if not os.path.exists(cls.confPath):
-            cf = {'libpath' : None}
+            cf = collections.OrderedDict([
+                        ('libpath', os.path.join(os.path.abspath(os.path.expanduser('~')), 'pa')),
+                        ('ConerenceMap', collections.OrderedDict([
+                                        ("Journal of Machine Learning Research", "JMLR"),
+                                        ("Neural Computation", "NC"),
+                                        ("IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE", "TPAMI"),
+                                        ("International World Wide Web Conference", "WWW"),
+                                        ("Association for the Advancement of Artificial Intelligence", "AAAI"),
+                                        ("Association for the Advancement of Artiﬁcial Intelligence", "AAAI"),
+                                        ("American Association for Artificial Intelligence", "AAAI"),
+                                        ("International Conference on Machine Learning", "ICML"),
+                                        ("Empirical Methods in Natural Language Processing", "EMNLP"),
+                                        ("Association for Computational Linguistics", "ACL"),
+                                        ("International Joint Conference on Artificial Intelligence", "IJCAI"),
+                                        ("Springer Nature", "Nature"),
+                                        ("ICLR", "ICLR"),
+                                        ("Mach Learn", "ML"),
+                                        ("NAACL", "NAACL"),
+                                        ("ECCV", "ECCV"),
+                                        ("SIGKDD", "SIGKDD"),
+                                        ("SIGMOD", "SIGMOD"),
+                                        ("ACM", "ACM"),
+                                        ("arXiv", "arXiv"),
+                                        ("Computer", "Computer"),
+                                        ("IEEE", "IEEE"),
+                        ]))
+            ])
             cls.setConf(cf)
             cls.saveConf()
-        cls.setConf(json.load(open(cls.confPath)))
+        cls.setConf(json.load(open(cls.confPath), strict=False, object_pairs_hook=collections.OrderedDict))
         return
 
     @classmethod
@@ -263,16 +265,19 @@ class PaperManager(object):
     @classmethod
     def setConf(cls, conf):
         cls.conf = conf
+        cls.ConerenceMap = conf['ConerenceMap']
 
     @classmethod
     def saveConf(cls):
-        json.dump(cls.conf, open(cls.confPath, 'w'))
+        json.dump(cls.conf, open(cls.confPath, 'w'), sort_keys=False, indent=2, ensure_ascii=False)
 
     @classmethod
     def getLibPath(cls):
         libPath = PaperManager.getConf()['libpath']
-        if libPath is not None:
+        if libPath is not None and os.path.exists(libPath):
             return libPath
+        elif libPath is not None:
+            os.mkdir(libPath)
         else:
             print("please set Library Dir with 'pa set --libpath /your/path/to/store/papers' ")
             exit(0)

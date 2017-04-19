@@ -10,12 +10,12 @@
                 |_|                                           
 
 ## Introduction
-Paper Arxiv is a command line base academic paper management tool. It provide an efficient access to your pdf files, comments, tags and so on.
+Paper Arxiv is a command line based academic paper management tool. It provides an efficient access to your pdf files, comments, tags and so on.
 
 ## Highlights
-- **Automatic Infortation Extraction**: It can extract information from pdf files, websites and generate default meta information.
+- **Automatic Information Extraction**: It can extract information from pdf files, websites and generate default meta information.
 - **Multi File Source**: You can add local files, URL links, websites.
-- **Protable**: all information are sotred in one floder and you can put in your cloud disk.
+- **Portable**: all information is stored in one folder and you can put in your cloud disk.
 - **Search Everything**: You can use its powerful find tool to find whatever you want.
 
 
@@ -28,7 +28,7 @@ pa config --libpath /Path/To/Store/Library
 ```
 
 ## Usage
-Here is a small example showing how to manage your file. For more details plseas refer to `pa --help`
+Here is a small example showing how to manage your file. For more details please refer to `pa --help`
 ```bash
 cd your_floder_storing_pdf_files
 pa add slide.pdf
@@ -36,7 +36,7 @@ pa add https://arxiv.org/pdf/1701.02720.pdf
 pa find VAE
 pa -h
 ```
-nk rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-fork-ribbon-css/0.2.0/gh-fork-ribbon.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-fork-ribbon-css/0.2.0/gh-fork-ribbon.min.css" />
 <!--[if lt IE 9]>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-fork-ribbon-css/0.2.0/gh-fork-ribbon.ie.min.css" />
 <![endif]-->

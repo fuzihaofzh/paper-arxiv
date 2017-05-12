@@ -143,10 +143,21 @@ class PaperDB():
         return map(lambda x: x[0], data)
 
     @classmethod
+    def getAllTags(cls):
+        with PaperDBCursor() as (cursor, tableName):
+            data = cursor.execute('select tags from %s'%(tableName)).fetchall()
+        return filter(lambda z: len(z) > 0, list(set(map(lambda y: y.strip(), re.split(',', ','.join(map(lambda x: x[0], data)))))))
+
+    @classmethod
     def find(cls, args):
         import re
         ret = []
         with PaperDBCursor() as (cursor, tableName):
+            #cols = args.keys()
+            #cols = ['name'] + cols if 'name' not in cols else cols
+            #cols = ','.join(cols)
+            #cond = ' or '.join([i + ' like "%' + args[i] + '%" ' for i in args])
+            #data = cursor.execute('select {0} from {1} where {2} '.format(cols, tableName, cond)).fetchall()
             for col in args:
                 data = cursor.execute('select name, {0} from {1} where {2} like "%{3}%" '.format(col, tableName, col, args[col])).fetchall()
                 data1 = map(lambda x: [x[0], re.sub(r'(?i)(%s)'%(args[col]), r'%s\1%s'%(Utils.colors.BROWN, Utils.colors.ENDC), x[1]).replace('\n', ' ')], data)
@@ -511,9 +522,13 @@ class PaperManager(object):
         print(os.path.join(cls.getLibPath(), name))
 
     @classmethod
-    def ls(cls):
-        names = PaperDB.getAllNames()
-        Utils.printList(names)
+    def ls(cls, lstags):
+        if lstags:
+            tags = PaperDB.getAllTags()
+            Utils.printList(tags)
+        else:
+            names = PaperDB.getAllNames()
+            Utils.printList(names)
 
     @classmethod
     def find(cls, args):
@@ -644,7 +659,7 @@ def ls(args):
     """
     List document names in the library.
     """
-    PaperManager.ls() 
+    PaperManager.ls(args.lstags) 
 
 def find(args):
     """
@@ -690,6 +705,8 @@ def main():
     parser_edit.set_defaults(func=edit)
     # ls
     parser_ls = subparsers.add_parser('ls', help='List document names in the library.')
+    parser_ls.add_argument('--tags', dest='lstags', action='store_true',
+                               help='List tags used in this lib.')
     parser_ls.set_defaults(func=ls)
     # show
     parser_show = subparsers.add_parser('show', help='show document information.')

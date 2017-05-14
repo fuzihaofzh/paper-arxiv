@@ -9,8 +9,6 @@ import os
 import json
 import io
 import time
-
-
 reload(sys)
 sys.setdefaultencoding('utf-8')
 
@@ -138,7 +136,7 @@ class PaperDB():
 
     @classmethod
     def getAllNames(cls):
-        with PaperDBCursor() as (cursor, tableName):
+        with PaperDBCursor () as (cursor, tableName):
             data = cursor.execute('select name from %s'%(tableName)).fetchall()
         return map(lambda x: x[0], data)
 
@@ -181,6 +179,12 @@ class PaperDB():
         with PaperDBCursor() as (cursor, tableName):
             sqlcmd = 'update %s set content = ?  where name = "%s"'%(tableName, name)
             cursor.execute(sqlcmd, (content,))
+
+    @classmethod
+    def sql(cls, sqlcmd):
+        with PaperDBCursor() as (cursor, tableName):
+            data = cursor.execute(sqlcmd.format(table = tableName)).fetchall()
+        print(data)
 
 class Utils():
     class colors:
@@ -247,12 +251,12 @@ class PaperManager(object):
                                         ("American Association for Artificial Intelligence", "AAAI"),
                                         ("International Conference on Machine Learning", "ICML"),
                                         ("Empirical Methods in Natural Language Processing", "EMNLP"),
+                                        ("NAACL", "NAACL"),
                                         ("Association for Computational Linguistics", "ACL"),
                                         ("International Joint Conference on Artificial Intelligence", "IJCAI"),
                                         ("Springer Nature", "Nature"),
                                         ("ICLR", "ICLR"),
                                         ("Mach Learn", "ML"),
-                                        ("NAACL", "NAACL"),
                                         ("ECCV", "ECCV"),
                                         ("SIGKDD", "SIGKDD"),
                                         ("SIGMOD", "SIGMOD"),
@@ -370,7 +374,7 @@ class PaperManager(object):
             if i in pcontent:
                 journal = cls.ConerenceMap[i]
                 break
-        rename = '-'.join([str(year), journal, authors[0].split()[-1]]) + '.pdf'
+        rename = '-'.join([str(year), journal, re.sub('[\%\/\<\>\^\|\?\&\#\*\\\:\" \n]', '', authors[0])]) + '.pdf'
         rename = re.sub('[\%\/\<\>\^\|\?\&\#\*\\\:\" ]', '+', rename)
         authors1 = '\n'.join((a.strip() for a in authors))
         addTime = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.localtime(time.time()))
@@ -609,6 +613,10 @@ class PaperManager(object):
                 content = h.handle(content)
         PaperDB.updateContent(name, content)
 
+    @classmethod
+    def sql(cls, sqlcmd):
+        PaperDB.sql(sqlcmd)
+
 
 def config(args):
     """
@@ -678,6 +686,9 @@ def updateContent(args):
 
 def updateAllContent(args):
     PaperManager.updateAllContent()
+
+def sql(args):
+    PaperManager.sql(args.sql)
 
 def main():
     PaperManager.loadConf()
@@ -757,6 +768,12 @@ def main():
     # updateAllContent
     parser_updateAllContent = subparsers.add_parser('updateAllContent', help='Update all records\' content in the library.')
     parser_updateAllContent.set_defaults(func=updateAllContent)
+    # sql
+    parser_sql = subparsers.add_parser('sql', help='excute sql cmd.')
+    parser_sql.add_argument('sql', metavar='SQL',
+                               help='sql command, use \{table\} as table name.')
+    parser_sql.set_defaults(func=sql)
+
 
     args = parser.parse_args()
     args.func(args)
